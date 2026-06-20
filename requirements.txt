@@ -1,0 +1,4 @@
+aiogram==3.20.0.post0
+aiohttp-socks==0.11.0
+aiosqlite==0.22.1
+yt-dlp==2026.3.17

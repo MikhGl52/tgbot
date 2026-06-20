@@ -1,0 +1,30 @@
+# Конфиг с токеном
+config.py
+
+# Виртуальное окружение
+.venv/
+venv/
+env/
+
+# База данных
+*.db
+
+# Скачанные видео
+downloads/
+
+# FFmpeg для Windows
+ffmpeg/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
