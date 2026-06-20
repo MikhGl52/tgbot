@@ -1,7 +1,7 @@
 import os
 import platform
 
-MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # 50 MB or 2 GB if usinng TG API
 
 TOKEN = "YOUR_BOT_TOKEN_HERE"
 
