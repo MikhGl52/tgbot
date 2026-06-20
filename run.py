@@ -9,6 +9,8 @@ from database import init_db, upsert_user
 from handlers.common import router as common_router
 from handlers.youtube import router as youtube_router
 from handlers.music import router as music_router
+from aiogram.client.telegram import TelegramAPIServer
+
 
 class UserTrackingMiddleware(BaseMiddleware):
     async def __call__(
@@ -31,12 +33,11 @@ dp.include_router(music_router)
 
 async def main():
     await init_db()
-
-    session = AiohttpSession(proxy='socks5://127.0.0.1:12334')
-    bot = Bot(token=TOKEN, session=session)
-    #bot = Bot(token=TOKEN) При деплое раскоментировать (если на иностранном серве)
+    bot = Bot(
+        token=TOKEN,
+        server=TelegramAPIServer.from_base('http://telegram-bot-api:8081')
+    )
     await dp.start_polling(bot)
-
 
 if __name__ == '__main__':
     try:
