@@ -5,7 +5,10 @@ from config import FFMPEG_PATH, MAX_SIZE_BYTES
 DOWNLOAD_DIR = 'downloads'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
 
 def is_instagram_url(text: str) -> bool:
     return 'instagram.com' in text
@@ -18,6 +21,7 @@ def download_instagram_video(url: str) -> dict:
         'outtmpl': output_template,
         'quiet': True,
         'merge_output_format': 'mp4',
+        'http_headers': HEADERS,
     }
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH

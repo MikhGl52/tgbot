@@ -9,7 +9,10 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 VALID_HEIGHTS = {144, 240, 360, 480, 720, 1080, 1440, 2160}
-
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}   
 
 def is_youtube_url(text: str) -> bool:
     return 'youtube.com' in text or 'youtu.be' in text
@@ -20,6 +23,7 @@ def search_videos(query: str) -> list[dict]:
         'quiet': True,
         'extract_flat': True,
         'skip_download': True,
+        'http_headers': HEADERS,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f'ytsearch5:{query}', download=False)

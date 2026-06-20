@@ -5,7 +5,10 @@ from config import FFMPEG_PATH, MAX_SIZE_BYTES
 DOWNLOAD_DIR = 'downloads'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
 
 
 def search_music(query: str) -> list[dict]:
@@ -13,6 +16,7 @@ def search_music(query: str) -> list[dict]:
         'quiet': True,
         'extract_flat': True,
         'skip_download': True,
+        'http_headers': HEADERS,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f'ytsearch5:{query} music', download=False)
