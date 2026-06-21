@@ -10,7 +10,7 @@ from database import init_db, upsert_user
 from handlers.common import router as common_router
 from handlers.youtube import router as youtube_router
 from handlers.music import router as music_router
-
+from aiohttp import ClientTimeout
 
 class UserTrackingMiddleware(BaseMiddleware):
     async def __call__(
@@ -36,7 +36,8 @@ async def main():
     await init_db()
     if USE_LOCAL_API:
         session = AiohttpSession(
-            api=TelegramAPIServer.from_base('http://telegram-bot-api:8081')
+            api=TelegramAPIServer.from_base('http://telegram-bot-api:8081'),
+            timeout=ClientTimeout(total=3600)  # 1 час
         )
     else:
         session = AiohttpSession(proxy=PROXY)
