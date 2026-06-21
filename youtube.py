@@ -38,13 +38,15 @@ def search_videos(query: str) -> list[dict]:
         return results
 
 
-def get_available_formats(url: str) -> list[dict]:
+def get_available_formats(url: str) -> tuple[list[dict], str]:
     ydl_opts = {'quiet': True}
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        thumbnail = info.get('thumbnail', '')
+        title = info.get('title', '')
         formats = []
         seen = set()
         for f in info['formats']:
@@ -63,8 +65,7 @@ def get_available_formats(url: str) -> list[dict]:
                 'height': height,
             })
         formats.sort(key=lambda x: x['height'])
-        return formats
-
+        return formats, thumbnail, title
 
 def split_video(input_path: str) -> list[str]:
     ffprobe = os.path.join(FFMPEG_PATH, 'ffprobe') if FFMPEG_PATH else 'ffprobe'

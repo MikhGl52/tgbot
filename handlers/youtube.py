@@ -1,13 +1,14 @@
 import os
 import asyncio
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, URLInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from youtube import is_youtube_url, search_videos, get_available_formats, download_video, MAX_SIZE_BYTES
 from instagram import is_instagram_url, download_instagram_video
 from handlers.common import service_menu
 from handlers.music import handle_search as music_search
+from queue_manager import queue_manager, DownloadTask
 
 router = Router()
 
@@ -15,6 +16,122 @@ router = Router()
 class DownloadStates(StatesGroup):
     choosing_video = State()
     choosing_quality = State()
+
+
+async def process_queue(user_id: int, bot: Bot, chat_id: int):
+    """Обрабатывает очередь пользователя"""
+    while True:
+        task = queue_manager.get_next_task(user_id)
+        if not task:
+            queue_manager.set_processing(user_id, False)
+            return
+
+        queue_manager.set_processing(user_id, True)
+        status_msg = await bot.send_message(chat_id, '⬇️ Downloading...\n░░░░░░░░░░ 0%')
+
+        queue = asyncio.Queue()
+        last_percent = [-1]
+        loop = asyncio.get_event_loop()
+
+        def progress_callback(percent, speed, eta):
+            if percent != last_percent[0] and percent % 5 == 0:
+                last_percent[0] = percent
+                asyncio.run_coroutine_threadsafe(
+                    queue.put((percent, speed, eta)), loop
+                )
+
+        async def update_progress():
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    if item is None:
+                        break
+                    percent, speed, eta = item
+                    filled = int(percent / 10)
+                    bar = '█' * filled + '░' * (10 - filled)
+                    speed_str = f'{speed/1024/1024:.1f} MB/s' if speed else '...'
+                    if eta:
+                        m, s = divmod(int(eta), 60)
+                        eta_str = f'{m}m {s}s' if m else f'{s}s'
+                    else:
+                        eta_str = '...'
+                    try:
+                        await status_msg.edit_text(
+                            f'⬇️ Downloading...\n'
+                            f'{bar} {percent}%\n'
+                            f'🚀 {speed_str} | ⏱ {eta_str}'
+                        )
+                    except Exception:
+                        pass
+                except asyncio.TimeoutError:
+                    continue
+
+        progress_task = asyncio.create_task(update_progress())
+
+        try:
+            if task.service == 'youtube':
+                result = await loop.run_in_executor(
+                    None, download_video, task.url, task.format_id, progress_callback
+                )
+            elif task.service == 'instagram':
+                result = await loop.run_in_executor(
+                    None, download_instagram_video, task.url
+                )
+            elif task.service == 'music':
+                from music import download_music
+                result = await loop.run_in_executor(
+                    None, download_music, task.url
+                )
+        except Exception as e:
+            await queue.put(None)
+            await progress_task
+            await status_msg.edit_text(f'❌ Download error: {e}')
+            queue_manager.complete_task(user_id)
+            continue
+
+        await queue.put(None)
+        await progress_task
+
+        # Отправляем результат
+        if task.service in ('youtube', 'instagram'):
+            if result.get('parts'):
+                total = len(result['parts'])
+                await status_msg.edit_text(f'📤 Sending {total} parts...')
+                for i, part_path in enumerate(result['parts'], 1):
+                    await bot.send_video(
+                        chat_id,
+                        FSInputFile(part_path),
+                        caption=f'Part {i}/{total}',
+                        request_timeout=7200
+                    )
+                    os.remove(part_path)
+                await status_msg.delete()
+            elif result.get('path'):
+                await status_msg.edit_text('📤 Sending...')
+                await bot.send_video(
+                    chat_id,
+                    FSInputFile(result['path']),
+                    request_timeout=7200
+                )
+                os.remove(result['path'])
+                await status_msg.delete()
+        elif task.service == 'music':
+            if result.get('path'):
+                await status_msg.edit_text('📤 Sending...')
+                await bot.send_audio(
+                    chat_id,
+                    FSInputFile(result['path']),
+                    request_timeout=7200
+                )
+                os.remove(result['path'])
+                await status_msg.delete()
+
+        queue_manager.complete_task(user_id)
+
+        # Показываем меню если очередь пуста
+        remaining = queue_manager.get_tasks(user_id)
+        if not remaining:
+            await bot.send_message(chat_id, 'Choose a service:', reply_markup=service_menu())
 
 
 @router.message(F.text)
@@ -84,7 +201,7 @@ async def handle_url(message: Message, state: FSMContext, url: str):
     waiting_msg = await message.answer('⏳ Getting available formats...')
     loop = asyncio.get_event_loop()
     try:
-        formats = await loop.run_in_executor(None, get_available_formats, url)
+        formats, thumbnail, title = await loop.run_in_executor(None, get_available_formats, url)
     except Exception as e:
         await waiting_msg.delete()
         await message.answer(f'Error: {e}')
@@ -92,7 +209,13 @@ async def handle_url(message: Message, state: FSMContext, url: str):
     await waiting_msg.delete()
 
     data = await state.get_data()
-    await state.update_data(url=url, user_msg_id=message.message_id, service=data.get('service'))
+    await state.update_data(
+        url=url,
+        user_msg_id=message.message_id,
+        service=data.get('service'),
+        video_title=title,
+        thumbnail=thumbnail
+    )
     await state.set_state(DownloadStates.choosing_quality)
 
     buttons = [
@@ -101,34 +224,43 @@ async def handle_url(message: Message, state: FSMContext, url: str):
     ]
     buttons.append([InlineKeyboardButton(text='❌ Cancel', callback_data='cancel')])
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await message.answer('Choose quality:', reply_markup=markup)
+
+    if thumbnail:
+        await message.answer_photo(
+            URLInputFile(thumbnail),
+            caption=f'🎬 <b>{title[:100]}</b>\n\nChoose quality:',
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+    else:
+        await message.answer(f'🎬 <b>{title[:100]}</b>\n\nChoose quality:', reply_markup=markup, parse_mode='HTML')
 
 
 async def handle_instagram_url(message: Message, state: FSMContext, url: str):
-    waiting_msg = await message.answer('⬇️ Downloading...')
-    loop = asyncio.get_event_loop()
-    try:
-        result = await loop.run_in_executor(None, download_instagram_video, url)
-    except Exception as e:
-        await waiting_msg.edit_text(f'Error: {e}')
+    user_id = message.from_user.id
+    task = DownloadTask(
+        user_id=user_id,
+        url=url,
+        format_id='best',
+        service='instagram',
+        title=url
+    )
+    position = queue_manager.add_task(task)
+
+    if position == -1:
+        await message.answer('⚠️ This video is already in your queue.')
         return
 
-    if result['too_large']:
-        await waiting_msg.edit_text(
-            f'❌ File is too large for Telegram (>{MAX_SIZE_BYTES // (1024 * 1024)}MB).\n'
-            f'🔗 Download directly: {result["direct_url"]}'
-        )
-    else:
-        await waiting_msg.edit_text('📤 Sending...')
-        await message.answer_video(FSInputFile(result['path']), request_timeout=7200)
-        os.remove(result['path'])
-        await waiting_msg.delete()
-
-    data = await state.get_data()
-    service = data.get('service')
-    await state.clear()
     msg = await message.answer('Choose a service:', reply_markup=service_menu())
-    await state.update_data(service=service, service_msg_id=msg.message_id)
+    data = await state.get_data()
+    await state.clear()
+    await state.update_data(service=data.get('service'), service_msg_id=msg.message_id)
+
+    if not queue_manager.is_processing(user_id):
+        asyncio.create_task(process_queue(user_id, message.bot, message.chat.id))
+
+    if position > 1:
+        await message.answer(f'✅ Added to queue at position #{position}')
 
 
 @router.callback_query(DownloadStates.choosing_video)
@@ -140,13 +272,13 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text('⏳ Getting available formats...')
     loop = asyncio.get_event_loop()
     try:
-        formats = await loop.run_in_executor(None, get_available_formats, url)
+        formats, thumbnail, title = await loop.run_in_executor(None, get_available_formats, url)
     except Exception as e:
         await call.message.edit_text(f'Error: {e}')
         return
     await call.message.delete()
 
-    await state.update_data(url=url, service=data.get('service'))
+    await state.update_data(url=url, service=data.get('service'), video_title=title, thumbnail=thumbnail)
     await state.set_state(DownloadStates.choosing_quality)
 
     buttons = [
@@ -155,7 +287,16 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     ]
     buttons.append([InlineKeyboardButton(text='❌ Cancel', callback_data='cancel')])
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await call.message.answer('Choose quality:', reply_markup=markup)
+
+    if thumbnail:
+        await call.message.answer_photo(
+            URLInputFile(thumbnail),
+            caption=f'🎬 <b>{title[:100]}</b>\n\nChoose quality:',
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+    else:
+        await call.message.answer(f'🎬 <b>{title[:100]}</b>\n\nChoose quality:', reply_markup=markup, parse_mode='HTML')
     await call.answer()
 
 
@@ -163,84 +304,44 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
 async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     parts = call.data.split('_', 2)
     format_id = parts[2]
+    quality_label = parts[1]
     data = await state.get_data()
     url = data['url']
     service = data.get('service')
+    title = data.get('video_title', url)
+    user_id = call.from_user.id
 
-    status_msg = await call.message.edit_text('⬇️ Downloading...\n░░░░░░░░░░ 0%')
+    task = DownloadTask(
+        user_id=user_id,
+        url=url,
+        format_id=format_id,
+        service='youtube',
+        title=title,
+        quality=quality_label
+    )
+    position = queue_manager.add_task(task)
     await call.answer()
 
-    queue = asyncio.Queue()
-    last_percent = [-1]
-    loop = asyncio.get_event_loop()
-
-    def progress_callback(percent, speed, eta):
-        if percent != last_percent[0] and percent % 5 == 0:
-            last_percent[0] = percent
-            asyncio.run_coroutine_threadsafe(
-                queue.put((percent, speed, eta)), loop
-            )
-
-    async def update_progress():
-        while True:
-            try:
-                item = await asyncio.wait_for(queue.get(), timeout=0.5)
-                if item is None:
-                    break
-                percent, speed, eta = item
-                filled = int(percent / 10)
-                bar = '█' * filled + '░' * (10 - filled)
-                speed_str = f'{speed/1024/1024:.1f} MB/s' if speed else '...'
-                if eta:
-                    m, s = divmod(int(eta), 60)
-                    eta_str = f'{m}m {s}s' if m else f'{s}s'
-                else:
-                    eta_str = '...'
-                await status_msg.edit_text(
-                    f'⬇️ Downloading...\n'
-                    f'{bar} {percent}%\n'
-                    f'🚀 {speed_str} | ⏱ {eta_str}'
-                )
-            except asyncio.TimeoutError:
-                continue
-
-    progress_task = asyncio.create_task(update_progress())
-
-    try:
-        result = await loop.run_in_executor(
-            None, download_video, url, format_id, progress_callback
-        )
-    except Exception as e:
-        await queue.put(None)
-        await progress_task
-        await status_msg.edit_text(f'Download error: {e}')
-        await state.clear()
-        await state.update_data(service=service)
+    if position == -1:
+        await call.message.answer('⚠️ This video is already in your queue.')
         return
 
-    await queue.put(None)
-    await progress_task
-
-    if result.get('parts'):
-        total = len(result['parts'])
-        await status_msg.edit_text(f'📤 Sending {total} parts...')
-        for i, part_path in enumerate(result['parts'], 1):
-            await call.message.answer_video(
-                FSInputFile(part_path),
-                caption=f'Part {i}/{total}',
-                request_timeout=7200
-            )
-            os.remove(part_path)
-        await status_msg.delete()
-    elif result['path']:
-        await status_msg.edit_text('📤 Sending...')
-        await call.message.answer_video(
-            FSInputFile(result['path']),
-            request_timeout=7200
-        )
-        os.remove(result['path'])
-        await status_msg.delete()
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
 
     msg = await call.message.answer('Choose a service:', reply_markup=service_menu())
     await state.clear()
     await state.update_data(service=service, service_msg_id=msg.message_id)
+
+    if position > 1:
+        await call.message.answer(f'✅ Added to queue at position #{position}')
+
+    if not queue_manager.is_processing(user_id):
+        asyncio.create_task(process_queue(user_id, call.bot, call.message.chat.id))
+
+
+@router.message(DownloadStates.choosing_quality)
+async def download_in_progress(message: Message):
+    await message.answer('⏳ Your download is in progress, please wait...')
