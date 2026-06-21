@@ -15,8 +15,30 @@ async def init_db():
                 created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS downloads (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                service     TEXT,
+                title       TEXT,
+                url         TEXT,
+                quality     TEXT,
+                file_size   INTEGER,
+                duration_sec INTEGER,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         await db.commit()
 
+
+async def log_download(user_id: int, service: str, title: str, url: str,
+                       quality: str, file_size: int, duration_sec: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            INSERT INTO downloads (user_id, service, title, url, quality, file_size, duration_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, service, title, url, quality, file_size, duration_sec))
+        await db.commit()
 
 async def upsert_user(user):
     async with aiosqlite.connect(DB_PATH) as db:

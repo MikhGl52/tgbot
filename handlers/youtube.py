@@ -9,6 +9,10 @@ from instagram import is_instagram_url, download_instagram_video
 from handlers.common import service_menu
 from handlers.music import handle_search as music_search
 from queue_manager import queue_manager, DownloadTask
+import time
+from database import log_download
+
+
 
 router = Router()
 
@@ -19,6 +23,9 @@ class DownloadStates(StatesGroup):
 
 
 async def process_queue(user_id: int, bot: Bot, chat_id: int):
+    import time
+    from database import log_download
+
     while True:
         task = queue_manager.get_next_task(user_id)
         if not task:
@@ -48,6 +55,7 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
         queue = asyncio.Queue()
         last_percent = [-1]
         loop = asyncio.get_event_loop()
+        start_time = time.time()
 
         def progress_callback(percent, speed, eta):
             if percent != last_percent[0] and percent % 5 == 0:
@@ -87,6 +95,7 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
         progress_task = asyncio.create_task(update_progress())
 
         cancelled = False
+        result = None
         try:
             if task.service == 'youtube':
                 result = await loop.run_in_executor(
@@ -115,12 +124,19 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
         await queue.put(None)
         await progress_task
 
-        if not cancelled:
+        elapsed = int(time.time() - start_time)
+        time_str = f'{elapsed // 60}m {elapsed % 60}s' if elapsed >= 60 else f'{elapsed}s'
+
+        if not cancelled and result:
             if task.service in ('youtube', 'instagram'):
                 if result.get('parts'):
                     total = len(result['parts'])
-                    await status_msg.edit_text(f'📤 Sending {total} parts...', reply_markup=None, parse_mode=None)
+                    await status_msg.edit_text(
+                        f'📤 Sending {total} parts...', reply_markup=None
+                    )
+                    total_size = 0
                     for i, part_path in enumerate(result['parts'], 1):
+                        total_size += os.path.getsize(part_path)
                         await bot.send_video(
                             chat_id, FSInputFile(part_path),
                             caption=f'Part {i}/{total}',
@@ -128,20 +144,57 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
                         )
                         os.remove(part_path)
                     await status_msg.delete()
+                    size_str = f'{total_size / 1024 / 1024:.1f} MB'
+                    await bot.send_message(
+                        chat_id,
+                        f'✅ <b>{task.title[:50]}</b>\n'
+                        f'📦 Size: {size_str} | ⏱ Time: {time_str}',
+                        parse_mode='HTML'
+                    )
+                    await log_download(user_id, task.service, task.title, task.url,
+                                       task.quality or '', total_size, elapsed)
+
                 elif result.get('path'):
+                    file_size = os.path.getsize(result['path'])
+                    size_str = f'{file_size / 1024 / 1024:.1f} MB'
                     await status_msg.edit_text('📤 Sending...', reply_markup=None)
-                    await bot.send_video(chat_id, FSInputFile(result['path']), request_timeout=7200)
+                    await bot.send_video(
+                        chat_id, FSInputFile(result['path']), request_timeout=7200
+                    )
                     os.remove(result['path'])
                     await status_msg.delete()
+                    await bot.send_message(
+                        chat_id,
+                        f'✅ <b>{task.title[:50]}</b>\n'
+                        f'📦 Size: {size_str} | ⏱ Time: {time_str}',
+                        parse_mode='HTML'
+                    )
+                    await log_download(user_id, task.service, task.title, task.url,
+                                       task.quality or '', file_size, elapsed)
+
             elif task.service == 'music':
                 if result.get('path'):
+                    file_size = os.path.getsize(result['path'])
+                    size_str = f'{file_size / 1024 / 1024:.1f} MB'
                     await status_msg.edit_text('📤 Sending...', reply_markup=None)
-                    await bot.send_audio(chat_id, FSInputFile(result['path']), request_timeout=7200)
+                    await bot.send_audio(
+                        chat_id, FSInputFile(result['path']), request_timeout=7200
+                    )
                     os.remove(result['path'])
                     await status_msg.delete()
+                    await bot.send_message(
+                        chat_id,
+                        f'✅ <b>{task.title[:50]}</b>\n'
+                        f'📦 Size: {size_str} | ⏱ Time: {time_str}',
+                        parse_mode='HTML'
+                    )
+                    await log_download(user_id, task.service, task.title, task.url,
+                                       task.quality or '', file_size, elapsed)
 
         queue_manager.complete_task(user_id)
 
+
+        
 @router.callback_query(F.data == 'cancel_download')
 async def on_cancel_download(call: CallbackQuery):
     user_id = call.from_user.id
@@ -204,7 +257,7 @@ async def handle_search(message: Message, state: FSMContext, text: str):
 
     buttons = [
         [InlineKeyboardButton(
-            text=f"{i+1}. {r['title'][:50]} [{r['duration']}]",
+            text=f"{i+1}. {r['title'][:35]} — {r['channel'][:15]} [{r['duration']}]",
             callback_data=f"video_{i}"
         )]
         for i, r in enumerate(results)
@@ -317,6 +370,8 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+MAX_QUEUE_SIZE = 5
+
 @router.callback_query(DownloadStates.choosing_quality)
 async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     parts = call.data.split('_', 2)
@@ -327,6 +382,12 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     service = data.get('service')
     title = data.get('video_title', url)
     user_id = call.from_user.id
+
+    # Лимит очереди
+    current_tasks = queue_manager.get_tasks(user_id)
+    if len(current_tasks) >= MAX_QUEUE_SIZE:
+        await call.answer(f'❌ Queue is full (max {MAX_QUEUE_SIZE} tasks).', show_alert=True)
+        return
 
     task = DownloadTask(
         user_id=user_id,
@@ -357,7 +418,6 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
 
     if not queue_manager.is_processing(user_id):
         asyncio.create_task(process_queue(user_id, call.bot, call.message.chat.id))
-
 
 @router.message(DownloadStates.choosing_quality)
 async def download_in_progress(message: Message):

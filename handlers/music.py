@@ -6,6 +6,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from music import search_music, download_music
 from handlers.common import service_menu
+from aiogram.types import URLInputFile
+
+
 
 router = Router()
 
@@ -34,7 +37,7 @@ async def handle_search(message: Message, state: FSMContext, query: str):
 
     buttons = [
         [InlineKeyboardButton(
-            text=f"{i+1}. {r['title'][:50]} [{r['duration']}]",
+            text=f"{i+1}. {r['title'][:40]} — {r['channel'][:20]} [{r['duration']}]",
             callback_data=f"track_{i}"
         )]
         for i, r in enumerate(results)
@@ -48,29 +51,47 @@ async def handle_search(message: Message, state: FSMContext, query: str):
 async def on_track_chosen(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[1])
     data = await state.get_data()
-    url = data['music_results'][idx]['url']
+    track = data['music_results'][idx]
+    url = track['url']
+    thumbnail = track.get('thumbnail', '')
     service = data.get('service')
 
-    await call.message.edit_text('⬇️ Downloading...')
+    # Показываем превьюшку
+    if thumbnail:
+        try:
+            await call.message.answer_photo(
+                URLInputFile(thumbnail),
+                caption=f'🎵 <b>{track["title"][:100]}</b>\n👤 {track["channel"]}',
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
+
+    await call.message.delete()
     await call.answer()
 
-    loop = asyncio.get_event_loop()
-    try:
-        result = await loop.run_in_executor(None, download_music, url)
-    except Exception as e:
-        await call.message.edit_text(f'Error: {e}')
-        await state.clear()
-        await state.update_data(service=service)
-        return
+    from queue_manager import queue_manager, DownloadTask
+    task = DownloadTask(
+        user_id=call.from_user.id,
+        url=url,
+        format_id='bestaudio',
+        service='music',
+        title=track['title'],
+        quality='MP3 320kbps'
+    )
+    position = queue_manager.add_task(task)
 
-    if result['too_large']:
-        await call.message.edit_text('❌ File is too large for Telegram (>50MB).')
-    else:
-        await call.message.edit_text('📤 Sending...')
-        await call.message.answer_audio(FSInputFile(result['path']), request_timeout=7200)
-        os.remove(result['path'])
-        await call.message.delete()
+    if position == -1:
+        await call.message.answer('⚠️ This track is already in your queue.')
+        return
 
     msg = await call.message.answer('Choose a service:', reply_markup=service_menu())
     await state.clear()
     await state.update_data(service=service, service_msg_id=msg.message_id)
+
+    if position > 1:
+        await call.message.answer(f'✅ Added to queue at position #{position}')
+
+    from handlers.youtube import process_queue
+    if not queue_manager.is_processing(call.from_user.id):
+        asyncio.create_task(process_queue(call.from_user.id, call.bot, call.message.chat.id))

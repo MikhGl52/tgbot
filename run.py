@@ -11,6 +11,9 @@ from handlers.common import router as common_router
 from handlers.youtube import router as youtube_router
 from handlers.music import router as music_router
 from handlers.queue import router as queue_router
+import glob
+import os
+
 
 class UserTrackingMiddleware(BaseMiddleware):
     async def __call__(
@@ -32,6 +35,12 @@ dp.include_router(queue_router)
 dp.include_router(youtube_router)
 dp.include_router(music_router)
 async def main():
+    for f in glob.glob('downloads/*'):
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+
     await init_db()
     if USE_LOCAL_API:
         session = AiohttpSession(
