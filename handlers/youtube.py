@@ -167,18 +167,20 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     url = data['url']
     service = data.get('service')
 
-    status_msg = await call.message.edit_text('⬇️ Downloading... 0%\n░░░░░░░░░░ 0%')
+    status_msg = await call.message.edit_text('⬇️ Downloading...\n░░░░░░░░░░ 0%')
     await call.answer()
 
     queue = asyncio.Queue()
     last_percent = [-1]
+    loop = asyncio.get_event_loop()
 
     def progress_callback(percent, speed, eta):
         if percent != last_percent[0] and percent % 5 == 0:
             last_percent[0] = percent
             asyncio.run_coroutine_threadsafe(
-                queue.put((percent, speed, eta)), asyncio.get_event_loop()
+                queue.put((percent, speed, eta)), loop
             )
+
     async def update_progress():
         while True:
             try:
@@ -188,14 +190,12 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
                 percent, speed, eta = item
                 filled = int(percent / 10)
                 bar = '█' * filled + '░' * (10 - filled)
-                
                 speed_str = f'{speed/1024/1024:.1f} MB/s' if speed else '...'
                 if eta:
                     m, s = divmod(int(eta), 60)
                     eta_str = f'{m}m {s}s' if m else f'{s}s'
                 else:
                     eta_str = '...'
-                
                 await status_msg.edit_text(
                     f'⬇️ Downloading...\n'
                     f'{bar} {percent}%\n'
@@ -204,7 +204,6 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
             except asyncio.TimeoutError:
                 continue
 
-    loop = asyncio.get_event_loop()
     progress_task = asyncio.create_task(update_progress())
 
     try:
