@@ -306,29 +306,33 @@ async def handle_url(message: Message, state: FSMContext, url: str):
         await message.answer(f'🎬 <b>{title[:100]}</b>\n\nChoose quality:', reply_markup=markup, parse_mode='HTML')
 
 
+# async def handle_instagram_url(message: Message, state: FSMContext, url: str):
+#     user_id = message.from_user.id
+#     task = DownloadTask(
+#         user_id=user_id,
+#         url=url,
+#         format_id='best',
+#         service='instagram',
+#         title=url
+#     )
+#     position = queue_manager.add_task(task)
+
+#     if position == -1:
+#         await message.answer('⚠️ This video is already in your queue.')
+#         return
+
+#     if position > 1:
+#         await message.answer(f'✅ Added to queue at position #{position}')
+
+#     if not queue_manager.is_processing(user_id):
+#         asyncio.create_task(process_queue(user_id, message.bot, message.chat.id))
+
 async def handle_instagram_url(message: Message, state: FSMContext, url: str):
-    user_id = message.from_user.id
-    task = DownloadTask(
-        user_id=user_id,
-        url=url,
-        format_id='best',
-        service='instagram',
-        title=url
+    await message.answer(
+        '⚠️ Instagram downloading is temporarily unavailable due to platform restrictions.\n'
+        'We apologize for the inconvenience and are working on a fix. Please try again later.'
     )
-    position = queue_manager.add_task(task)
 
-    if position == -1:
-        await message.answer('⚠️ This video is already in your queue.')
-        return
-
-    if position > 1:
-        await message.answer(f'✅ Added to queue at position #{position}')
-
-    if not queue_manager.is_processing(user_id):
-        asyncio.create_task(process_queue(user_id, message.bot, message.chat.id))
-
-
-        
 @router.callback_query(DownloadStates.choosing_video)
 async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[1])
