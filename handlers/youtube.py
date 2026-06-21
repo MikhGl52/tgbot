@@ -194,7 +194,7 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
         queue_manager.complete_task(user_id)
 
 
-        
+
 @router.callback_query(F.data == 'cancel_download')
 async def on_cancel_download(call: CallbackQuery):
     user_id = call.from_user.id
@@ -321,18 +321,14 @@ async def handle_instagram_url(message: Message, state: FSMContext, url: str):
         await message.answer('⚠️ This video is already in your queue.')
         return
 
-    msg = await message.answer('Choose a service:', reply_markup=service_menu())
-    data = await state.get_data()
-    await state.clear()
-    await state.update_data(service=data.get('service'), service_msg_id=msg.message_id)
+    if position > 1:
+        await message.answer(f'✅ Added to queue at position #{position}')
 
     if not queue_manager.is_processing(user_id):
         asyncio.create_task(process_queue(user_id, message.bot, message.chat.id))
 
-    if position > 1:
-        await message.answer(f'✅ Added to queue at position #{position}')
 
-
+        
 @router.callback_query(DownloadStates.choosing_video)
 async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[1])
