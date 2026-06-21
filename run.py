@@ -5,12 +5,12 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.fsm.storage.memory import MemoryStorage
 from typing import Callable, Awaitable, Any
-from config import *
+from config import TOKEN, USE_LOCAL_API, PROXY
 from database import init_db, upsert_user
 from handlers.common import router as common_router
 from handlers.youtube import router as youtube_router
 from handlers.music import router as music_router
-from aiohttp import ClientTimeout
+
 
 class UserTrackingMiddleware(BaseMiddleware):
     async def __call__(
@@ -37,9 +37,16 @@ async def main():
     if USE_LOCAL_API:
         session = AiohttpSession(
             api=TelegramAPIServer.from_base('http://telegram-bot-api:8081'),
-            timeout=ClientTimeout(total=3600)  # 1 час
+            timeout=7200
         )
     else:
         session = AiohttpSession(proxy=PROXY)
     bot = Bot(token=TOKEN, session=session)
     await dp.start_polling(bot)
+
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('Exit')

@@ -1,4 +1,5 @@
 import os
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
@@ -22,11 +23,10 @@ async def handle_text(message: Message, state: FSMContext):
     service = data.get('service')
 
     if service is None:
-        msg = await message.answer('Please choose a service first: ', reply_markup=service_menu())
+        msg = await message.answer('Please choose a service first:', reply_markup=service_menu())
         await state.update_data(service_msg_id=msg.message_id)
         return
 
-    
     service_msg_id = data.get('service_msg_id')
     if service_msg_id:
         try:
@@ -49,9 +49,11 @@ async def handle_text(message: Message, state: FSMContext):
     elif service == 'music':
         await music_search(message, state, text)
 
+
 async def handle_search(message: Message, state: FSMContext, text: str):
     searching_msg = await message.answer('🔍 Searching...')
-    results = search_videos(text)
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, search_videos, text)
     await searching_msg.delete()
 
     if not results:
@@ -80,8 +82,9 @@ async def handle_search(message: Message, state: FSMContext, text: str):
 
 async def handle_url(message: Message, state: FSMContext, url: str):
     waiting_msg = await message.answer('⏳ Getting available formats...')
+    loop = asyncio.get_event_loop()
     try:
-        formats = get_available_formats(url)
+        formats = await loop.run_in_executor(None, get_available_formats, url)
     except Exception as e:
         await waiting_msg.delete()
         await message.answer(f'Error: {e}')
@@ -103,8 +106,9 @@ async def handle_url(message: Message, state: FSMContext, url: str):
 
 async def handle_instagram_url(message: Message, state: FSMContext, url: str):
     waiting_msg = await message.answer('⬇️ Downloading...')
+    loop = asyncio.get_event_loop()
     try:
-        result = download_instagram_video(url)
+        result = await loop.run_in_executor(None, download_instagram_video, url)
     except Exception as e:
         await waiting_msg.edit_text(f'Error: {e}')
         return
@@ -112,11 +116,11 @@ async def handle_instagram_url(message: Message, state: FSMContext, url: str):
     if result['too_large']:
         await waiting_msg.edit_text(
             f'❌ File is too large for Telegram (>{MAX_SIZE_BYTES // (1024 * 1024)}MB).\n'
-            f'🔗 You dont have to see these text due to reason these code part is unreacheable. Idk how you reached these, but u can watch ur video: {result["direct_url"]}'
+            f'🔗 Download directly: {result["direct_url"]}'
         )
     else:
         await waiting_msg.edit_text('📤 Sending...')
-        await message.answer_video(FSInputFile(result['path']))
+        await message.answer_video(FSInputFile(result['path']), request_timeout=7200)
         os.remove(result['path'])
         await waiting_msg.delete()
 
@@ -134,8 +138,9 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     url = data['search_results'][idx]['url']
 
     await call.message.edit_text('⏳ Getting available formats...')
+    loop = asyncio.get_event_loop()
     try:
-        formats = get_available_formats(url)
+        formats = await loop.run_in_executor(None, get_available_formats, url)
     except Exception as e:
         await call.message.edit_text(f'Error: {e}')
         return
@@ -150,7 +155,7 @@ async def on_video_chosen(call: CallbackQuery, state: FSMContext):
     ]
     buttons.append([InlineKeyboardButton(text='❌ Cancel', callback_data='cancel')])
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await call.message.answer('Choose a quality:', reply_markup=markup)
+    await call.message.answer('Choose quality:', reply_markup=markup)
     await call.answer()
 
 
@@ -165,8 +170,9 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text('⬇️ Downloading...')
     await call.answer()
 
+    loop = asyncio.get_event_loop()
     try:
-        result = download_video(url, format_id)
+        result = await loop.run_in_executor(None, download_video, url, format_id)
     except Exception as e:
         await call.message.edit_text(f'Download error: {e}')
         await state.clear()
@@ -180,7 +186,7 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
             await call.message.answer_video(
                 FSInputFile(part_path),
                 caption=f'Part {i}/{total}',
-                request_timeout=3600
+                request_timeout=7200
             )
             os.remove(part_path)
         await call.message.delete()
@@ -188,7 +194,7 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text('📤 Sending...')
         await call.message.answer_video(
             FSInputFile(result['path']),
-            request_timeout=3600
+            request_timeout=7200
         )
         os.remove(result['path'])
         await call.message.delete()

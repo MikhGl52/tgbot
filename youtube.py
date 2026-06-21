@@ -122,17 +122,8 @@ def download_video(url: str, format_id: str) -> dict:
         'outtmpl': output_template,
         'quiet': True,
         'merge_output_format': 'mp4',
+        'concurrent_fragment_downloads': 4,
+        'http_headers': HEADERS,
     }
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info).replace('.webm', '.mp4').replace('.mkv', '.mp4')
-
-        if os.path.getsize(filename) > MAX_SIZE_BYTES:
-            parts = split_video(filename)
-            os.remove(filename)
-            return {'path': None, 'too_large': False, 'parts': parts, 'direct_url': None}
-
-        return {'path': filename, 'too_large': False, 'parts': None, 'direct_url': None}

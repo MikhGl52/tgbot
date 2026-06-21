@@ -1,0 +1,7 @@
+downloads/
+telegram-bot-api-data/
+.git/
+.venv/
+*.db
+data/
+ffmpeg/

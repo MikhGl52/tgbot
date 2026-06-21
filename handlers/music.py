@@ -1,4 +1,5 @@
 import os
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
@@ -13,29 +14,10 @@ class MusicStates(StatesGroup):
     choosing_track = State()
 
 
-
-async def handle_music_text(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = data.get('service')
-
-    if service != 'music':
-        return
-
-   
-    service_msg_id = data.get('service_msg_id')
-    if service_msg_id:
-        try:
-            await message.bot.delete_message(message.chat.id, service_msg_id)
-        except Exception:
-            pass
-
-    text = message.text.strip()
-    await handle_search(message, state, text)
-
-
 async def handle_search(message: Message, state: FSMContext, query: str):
     searching_msg = await message.answer('🔍 Searching...')
-    results = search_music(query)
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, search_music, query)
     await searching_msg.delete()
 
     if not results:
@@ -72,8 +54,9 @@ async def on_track_chosen(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text('⬇️ Downloading...')
     await call.answer()
 
+    loop = asyncio.get_event_loop()
     try:
-        result = download_music(url)
+        result = await loop.run_in_executor(None, download_music, url)
     except Exception as e:
         await call.message.edit_text(f'Error: {e}')
         await state.clear()
@@ -81,10 +64,10 @@ async def on_track_chosen(call: CallbackQuery, state: FSMContext):
         return
 
     if result['too_large']:
-        await call.message.edit_text('❌ File is too large for Telegram.')
+        await call.message.edit_text('❌ File is too large for Telegram (>50MB).')
     else:
         await call.message.edit_text('📤 Sending...')
-        await call.message.answer_audio(FSInputFile(result['path']))
+        await call.message.answer_audio(FSInputFile(result['path']), request_timeout=7200)
         os.remove(result['path'])
         await call.message.delete()
 
