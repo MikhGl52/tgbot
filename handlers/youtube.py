@@ -167,21 +167,50 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
     url = data['url']
     service = data.get('service')
 
-    await call.message.edit_text('⬇️ Downloading...')
+    status_msg = await call.message.edit_text('⬇️ Downloading... 0%\n░░░░░░░░░░ 0%')
     await call.answer()
 
+    queue = asyncio.Queue()
+    last_percent = [-1]
+
+    def progress_callback(percent):
+        if percent != last_percent[0] and percent % 5 == 0:
+            last_percent[0] = percent
+            asyncio.run_coroutine_threadsafe(queue.put(percent), asyncio.get_event_loop())
+
+    async def update_progress():
+        while True:
+            try:
+                percent = await asyncio.wait_for(queue.get(), timeout=0.5)
+                if percent is None:
+                    break
+                filled = int(percent / 10)
+                bar = '█' * filled + '░' * (10 - filled)
+                await status_msg.edit_text(f'⬇️ Downloading...\n{bar} {percent}%')
+            except asyncio.TimeoutError:
+                continue
+
     loop = asyncio.get_event_loop()
+    progress_task = asyncio.create_task(update_progress())
+
     try:
-        result = await loop.run_in_executor(None, download_video, url, format_id)
+        result = await loop.run_in_executor(
+            None, download_video, url, format_id, progress_callback
+        )
     except Exception as e:
-        await call.message.edit_text(f'Download error: {e}')
+        await queue.put(None)
+        await progress_task
+        await status_msg.edit_text(f'Download error: {e}')
         await state.clear()
         await state.update_data(service=service)
         return
 
+    await queue.put(None)
+    await progress_task
+
     if result.get('parts'):
         total = len(result['parts'])
-        await call.message.edit_text(f'📤 Sending {total} parts...')
+        await status_msg.edit_text(f'📤 Sending {total} parts...')
         for i, part_path in enumerate(result['parts'], 1):
             await call.message.answer_video(
                 FSInputFile(part_path),
@@ -189,15 +218,15 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
                 request_timeout=7200
             )
             os.remove(part_path)
-        await call.message.delete()
+        await status_msg.delete()
     elif result['path']:
-        await call.message.edit_text('📤 Sending...')
+        await status_msg.edit_text('📤 Sending...')
         await call.message.answer_video(
             FSInputFile(result['path']),
             request_timeout=7200
         )
         os.remove(result['path'])
-        await call.message.delete()
+        await status_msg.delete()
 
     msg = await call.message.answer('Choose a service:', reply_markup=service_menu())
     await state.clear()

@@ -115,8 +115,17 @@ def split_video(input_path: str) -> list[str]:
 
     return parts
 
-def download_video(url: str, format_id: str) -> dict:
+def download_video(url: str, format_id: str, progress_callback=None) -> dict:
     output_template = os.path.join(DOWNLOAD_DIR, '%(id)s_%(height)s.%(ext)s')
+
+    def progress_hook(d):
+        if progress_callback and d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            downloaded = d.get('downloaded_bytes', 0)
+            if total:
+                percent = int(downloaded / total * 100)
+                progress_callback(percent)
+
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_template,
@@ -124,6 +133,18 @@ def download_video(url: str, format_id: str) -> dict:
         'merge_output_format': 'mp4',
         'concurrent_fragment_downloads': 4,
         'http_headers': HEADERS,
+        'progress_hooks': [progress_hook],
     }
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info).replace('.webm', '.mp4').replace('.mkv', '.mp4')
+
+        if os.path.getsize(filename) > MAX_SIZE_BYTES:
+            parts = split_video(filename)
+            os.remove(filename)
+            return {'path': None, 'too_large': False, 'parts': parts, 'direct_url': None}
+
+        return {'path': filename, 'too_large': False, 'parts': None, 'direct_url': None}
