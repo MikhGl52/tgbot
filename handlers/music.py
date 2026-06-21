@@ -46,7 +46,7 @@ async def handle_search(message: Message, state: FSMContext, query: str):
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer('Choose a track:', reply_markup=markup)
 
-@router.callback_query(MusicStates.choosing_track)
+@router.callback_query(MusicStates.choosing_track, F.data.startswith('track_'))
 async def on_track_chosen(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[1])
     data = await state.get_data()
