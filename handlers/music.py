@@ -46,7 +46,6 @@ async def handle_search(message: Message, state: FSMContext, query: str):
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer('Choose a track:', reply_markup=markup)
 
-
 @router.callback_query(MusicStates.choosing_track)
 async def on_track_chosen(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[1])
@@ -56,19 +55,46 @@ async def on_track_chosen(call: CallbackQuery, state: FSMContext):
     thumbnail = track.get('thumbnail', '')
     service = data.get('service')
 
-    # Показываем превьюшку
+    await call.answer()
+    await call.message.delete()
+
+    confirm_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='⬇️ Download', callback_data=f'music_confirm_{idx}')],
+        [InlineKeyboardButton(text='❌ Cancel', callback_data='cancel')]
+    ])
+
     if thumbnail:
         try:
             await call.message.answer_photo(
                 URLInputFile(thumbnail),
-                caption=f'🎵 <b>{track["title"][:100]}</b>\n👤 {track["channel"]}',
+                caption=f'🎵 <b>{track["title"][:100]}</b>\n👤 {track["channel"]}\n⏱ {track["duration"]}',
+                reply_markup=confirm_markup,
                 parse_mode='HTML'
             )
         except Exception:
-            pass
+            await call.message.answer(
+                f'🎵 <b>{track["title"][:100]}</b>\n👤 {track["channel"]}',
+                reply_markup=confirm_markup,
+                parse_mode='HTML'
+            )
+    else:
+        await call.message.answer(
+            f'🎵 <b>{track["title"][:100]}</b>\n👤 {track["channel"]}',
+            reply_markup=confirm_markup,
+            parse_mode='HTML'
+        )
 
-    await call.message.delete()
+
+@router.callback_query(F.data.startswith('music_confirm_'))
+async def on_music_confirmed(call: CallbackQuery, state: FSMContext):
+    idx = int(call.data.split('_')[2])
+    data = await state.get_data()
+    track = data['music_results'][idx]
+    url = track['url']
+    service = data.get('service')
+
     await call.answer()
+    await call.message.delete()
 
     from queue_manager import queue_manager, DownloadTask
     task = DownloadTask(
