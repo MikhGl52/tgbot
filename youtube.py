@@ -122,10 +122,11 @@ def download_video(url: str, format_id: str, progress_callback=None) -> dict:
         if progress_callback and d['status'] == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
             downloaded = d.get('downloaded_bytes', 0)
+            speed = d.get('speed', 0) or 0
+            eta = d.get('eta', 0) or 0
             if total:
                 percent = int(downloaded / total * 100)
-                progress_callback(percent)
-
+                progress_callback(percent, speed, eta)
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_template,
