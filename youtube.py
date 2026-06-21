@@ -38,8 +38,11 @@ def search_videos(query: str) -> list[dict]:
         return results
 
 
-def get_available_formats(url: str) -> tuple[list[dict], str]:
-    ydl_opts = {'quiet': True}
+def get_available_formats(url: str) -> tuple[list[dict], str, str]:
+    ydl_opts = {
+        'quiet': True,
+        'noplaylist': True,
+    }
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
@@ -139,6 +142,7 @@ def download_video(url: str, format_id: str, progress_callback=None, cancel_even
         'concurrent_fragment_downloads': 4,
         'http_headers': HEADERS,
         'progress_hooks': [progress_hook],
+        'noplaylist': True,  # <- добавь
     }
     if FFMPEG_PATH:
         ydl_opts['ffmpeg_location'] = FFMPEG_PATH
