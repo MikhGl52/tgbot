@@ -89,6 +89,12 @@ async def on_track_chosen(call: CallbackQuery, state: FSMContext):
 async def on_music_confirmed(call: CallbackQuery, state: FSMContext):
     idx = int(call.data.split('_')[2])
     data = await state.get_data()
+
+    if not data.get('music_results'):
+        await call.answer('Session expired, please search again.', show_alert=True)
+        await call.message.delete()
+        return
+
     track = data['music_results'][idx]
     url = track['url']
     service = data.get('service')
