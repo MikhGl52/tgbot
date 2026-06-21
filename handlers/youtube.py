@@ -19,15 +19,31 @@ class DownloadStates(StatesGroup):
 
 
 async def process_queue(user_id: int, bot: Bot, chat_id: int):
-    """Обрабатывает очередь пользователя"""
     while True:
         task = queue_manager.get_next_task(user_id)
         if not task:
             queue_manager.set_processing(user_id, False)
+            await bot.send_message(
+                chat_id,
+                '✅ All downloads completed! Choose a service:',
+                reply_markup=service_menu()
+            )
             return
 
         queue_manager.set_processing(user_id, True)
-        status_msg = await bot.send_message(chat_id, '⬇️ Downloading...\n░░░░░░░░░░ 0%')
+        cancel_event = queue_manager.get_cancel_event(user_id)
+        cancel_event.clear()
+
+        cancel_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='❌ Cancel download', callback_data='cancel_download')]
+        ])
+
+        status_msg = await bot.send_message(
+            chat_id,
+            f'⬇️ <b>{task.title[:50]}</b>\n░░░░░░░░░░ 0%',
+            reply_markup=cancel_markup,
+            parse_mode='HTML'
+        )
 
         queue = asyncio.Queue()
         last_percent = [-1]
@@ -57,9 +73,11 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
                         eta_str = '...'
                     try:
                         await status_msg.edit_text(
-                            f'⬇️ Downloading...\n'
+                            f'⬇️ <b>{task.title[:50]}</b>\n'
                             f'{bar} {percent}%\n'
-                            f'🚀 {speed_str} | ⏱ {eta_str}'
+                            f'🚀 {speed_str} | ⏱ {eta_str}',
+                            reply_markup=cancel_markup,
+                            parse_mode='HTML'
                         )
                     except Exception:
                         pass
@@ -68,10 +86,11 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
 
         progress_task = asyncio.create_task(update_progress())
 
+        cancelled = False
         try:
             if task.service == 'youtube':
                 result = await loop.run_in_executor(
-                    None, download_video, task.url, task.format_id, progress_callback
+                    None, download_video, task.url, task.format_id, progress_callback, cancel_event
                 )
             elif task.service == 'instagram':
                 result = await loop.run_in_executor(
@@ -85,54 +104,52 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
         except Exception as e:
             await queue.put(None)
             await progress_task
-            await status_msg.edit_text(f'❌ Download error: {e}')
+            if cancel_event.is_set():
+                cancelled = True
+                await status_msg.edit_text('🚫 Download cancelled.', reply_markup=None)
+            else:
+                await status_msg.edit_text(f'❌ Download error: {e}', reply_markup=None)
             queue_manager.complete_task(user_id)
             continue
 
         await queue.put(None)
         await progress_task
 
-        # Отправляем результат
-        if task.service in ('youtube', 'instagram'):
-            if result.get('parts'):
-                total = len(result['parts'])
-                await status_msg.edit_text(f'📤 Sending {total} parts...')
-                for i, part_path in enumerate(result['parts'], 1):
-                    await bot.send_video(
-                        chat_id,
-                        FSInputFile(part_path),
-                        caption=f'Part {i}/{total}',
-                        request_timeout=7200
-                    )
-                    os.remove(part_path)
-                await status_msg.delete()
-            elif result.get('path'):
-                await status_msg.edit_text('📤 Sending...')
-                await bot.send_video(
-                    chat_id,
-                    FSInputFile(result['path']),
-                    request_timeout=7200
-                )
-                os.remove(result['path'])
-                await status_msg.delete()
-        elif task.service == 'music':
-            if result.get('path'):
-                await status_msg.edit_text('📤 Sending...')
-                await bot.send_audio(
-                    chat_id,
-                    FSInputFile(result['path']),
-                    request_timeout=7200
-                )
-                os.remove(result['path'])
-                await status_msg.delete()
+        if not cancelled:
+            if task.service in ('youtube', 'instagram'):
+                if result.get('parts'):
+                    total = len(result['parts'])
+                    await status_msg.edit_text(f'📤 Sending {total} parts...', reply_markup=None, parse_mode=None)
+                    for i, part_path in enumerate(result['parts'], 1):
+                        await bot.send_video(
+                            chat_id, FSInputFile(part_path),
+                            caption=f'Part {i}/{total}',
+                            request_timeout=7200
+                        )
+                        os.remove(part_path)
+                    await status_msg.delete()
+                elif result.get('path'):
+                    await status_msg.edit_text('📤 Sending...', reply_markup=None)
+                    await bot.send_video(chat_id, FSInputFile(result['path']), request_timeout=7200)
+                    os.remove(result['path'])
+                    await status_msg.delete()
+            elif task.service == 'music':
+                if result.get('path'):
+                    await status_msg.edit_text('📤 Sending...', reply_markup=None)
+                    await bot.send_audio(chat_id, FSInputFile(result['path']), request_timeout=7200)
+                    os.remove(result['path'])
+                    await status_msg.delete()
 
         queue_manager.complete_task(user_id)
 
-        # Показываем меню если очередь пуста
-        remaining = queue_manager.get_tasks(user_id)
-        if not remaining:
-            await bot.send_message(chat_id, 'Choose a service:', reply_markup=service_menu())
-
+@router.callback_query(F.data == 'cancel_download')
+async def on_cancel_download(call: CallbackQuery):
+    user_id = call.from_user.id
+    if queue_manager.is_processing(user_id):
+        queue_manager.cancel_current(user_id)
+        await call.answer('Cancelling download...', show_alert=False)
+    else:
+        await call.answer('Nothing to cancel.', show_alert=True)
 
 @router.message(F.text)
 async def handle_text(message: Message, state: FSMContext):

@@ -116,10 +116,12 @@ def split_video(input_path: str) -> list[str]:
 
     return parts
 
-def download_video(url: str, format_id: str, progress_callback=None) -> dict:
+def download_video(url: str, format_id: str, progress_callback=None, cancel_event=None) -> dict:
     output_template = os.path.join(DOWNLOAD_DIR, '%(id)s_%(height)s.%(ext)s')
 
     def progress_hook(d):
+        if cancel_event and cancel_event.is_set():
+            raise Exception('Download cancelled by user')
         if progress_callback and d['status'] == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
             downloaded = d.get('downloaded_bytes', 0)
@@ -128,6 +130,7 @@ def download_video(url: str, format_id: str, progress_callback=None) -> dict:
             if total:
                 percent = int(downloaded / total * 100)
                 progress_callback(percent, speed, eta)
+
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_template,

@@ -64,6 +64,24 @@ async def cmd_music(message: Message, state: FSMContext):
     await state.update_data(service_msg_id=msg.message_id)
 
 
+@router.message(F.text == '/help')
+async def help_cmd(message: Message):
+    await message.answer(
+        '📖 <b>Available commands:</b>\n\n'
+        '/start — Start the bot\n'
+        '/menu — Open service selection\n'
+        '/youtube — Download from YouTube\n'
+        '/instagram — Download from Instagram\n'
+        '/music — Download music (MP3 320kbps)\n'
+        '/queue — Show your download queue\n'
+        '/help — Show this message\n\n'
+        '📌 <b>How to use:</b>\n'
+        '• Send a YouTube/Instagram link to download\n'
+        '• Send a title to search on YouTube or Music\n'
+        '• You can queue multiple downloads at once',
+        parse_mode='HTML'
+    )
+
 @router.callback_query(F.data.startswith('service_'))
 async def on_service_chosen(call: CallbackQuery, state: FSMContext):
     await state.clear()
