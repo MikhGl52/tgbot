@@ -2,14 +2,14 @@ import asyncio
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import TelegramObject
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.fsm.storage.memory import MemoryStorage
 from typing import Callable, Awaitable, Any
-from config import TOKEN
+from config import *
 from database import init_db, upsert_user
 from handlers.common import router as common_router
 from handlers.youtube import router as youtube_router
 from handlers.music import router as music_router
-from aiogram.client.telegram import TelegramAPIServer
 
 
 class UserTrackingMiddleware(BaseMiddleware):
@@ -31,16 +31,14 @@ dp.include_router(common_router)
 dp.include_router(youtube_router)
 dp.include_router(music_router)
 
+
 async def main():
     await init_db()
-    bot = Bot(
-        token=TOKEN,
-        server=TelegramAPIServer.from_base('http://telegram-bot-api:8081')
-    )
+    if USE_LOCAL_API:
+        session = AiohttpSession(
+            api=TelegramAPIServer.from_base('http://telegram-bot-api:8081')
+        )
+    else:
+        session = AiohttpSession(proxy=PROXY)
+    bot = Bot(token=TOKEN, session=session)
     await dp.start_polling(bot)
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print('Exit')

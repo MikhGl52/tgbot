@@ -179,13 +179,17 @@ async def on_quality_chosen(call: CallbackQuery, state: FSMContext):
         for i, part_path in enumerate(result['parts'], 1):
             await call.message.answer_video(
                 FSInputFile(part_path),
-                caption=f'Part {i}/{total}'
+                caption=f'Part {i}/{total}',
+                request_timeout=3600
             )
             os.remove(part_path)
         await call.message.delete()
     elif result['path']:
         await call.message.edit_text('📤 Sending...')
-        await call.message.answer_video(FSInputFile(result['path']))
+        await call.message.answer_video(
+            FSInputFile(result['path']),
+            request_timeout=3600
+        )
         os.remove(result['path'])
         await call.message.delete()
 
