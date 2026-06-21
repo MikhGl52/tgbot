@@ -16,20 +16,22 @@ def search_music(query: str) -> list[dict]:
         'quiet': True,
         'extract_flat': True,
         'skip_download': True,
-        'http_headers': HEADERS,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f'ytsearch5:{query} music', download=False)
         results = []
         for v in info['entries']:
+            # thumbnail недоступен при extract_flat, строим URL вручную
+            video_id = v.get('id', '')
+            thumbnail = f'https://i.ytimg.com/vi/{video_id}/hqdefault.jpg'
             results.append({
-                'title': v.get('title', 'Без названия'),
-                'url': f"https://www.youtube.com/watch?v={v['id']}",
+                'title': v.get('title', 'No title'),
+                'url': f"https://www.youtube.com/watch?v={video_id}",
                 'duration': str(v.get('duration', '?')) + 's',
                 'channel': v.get('channel') or v.get('uploader', ''),
+                'thumbnail': thumbnail,
             })
         return results
-    
 def download_music(url: str) -> dict:
     output_template = os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s')
     ydl_opts = {
