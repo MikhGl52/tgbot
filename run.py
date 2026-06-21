@@ -28,10 +28,9 @@ class UserTrackingMiddleware(BaseMiddleware):
 dp = Dispatcher(storage=MemoryStorage())
 dp.update.middleware(UserTrackingMiddleware())
 dp.include_router(common_router)
+dp.include_router(queue_router)
 dp.include_router(youtube_router)
 dp.include_router(music_router)
-dp.include_router(queue_router)
-
 async def main():
     await init_db()
     if USE_LOCAL_API:
