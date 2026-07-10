@@ -111,15 +111,28 @@ async def process_queue(user_id: int, bot: Bot, chat_id: int):
                     None, download_music, task.url
                 )
         except Exception as e:
-            await queue.put(None)
-            await progress_task
-            if cancel_event.is_set():
-                cancelled = True
-                await status_msg.edit_text('🚫 Download cancelled.', reply_markup=None)
-            else:
-                await status_msg.edit_text(f'❌ Download error: {e}', reply_markup=None)
-            queue_manager.complete_task(user_id)
-            continue
+                    await queue.put(None)
+                    await progress_task
+                    if cancel_event.is_set():
+                        cancelled = True
+                        await status_msg.edit_text('🚫 Download cancelled.', reply_markup=None)
+                    else:
+                        error_str = str(e)
+                        if 'Instagram' in error_str and 'empty media response' in error_str:
+                            msg = '❌ This Instagram post is unavailable — it may be private, deleted or geo-restricted.'
+                        elif 'Instagram' in error_str and ('rate-limit' in error_str or 'login required' in error_str):
+                            msg = '❌ Instagram rate limit reached. Please try again in a few minutes.'
+                        elif 'Sign in to confirm' in error_str:
+                            msg = '❌ YouTube requires sign-in for this video. Try a different video.'
+                        elif '403' in error_str:
+                            msg = '❌ Access denied. The video may be private or region-restricted.'
+                        elif '404' in error_str:
+                            msg = '❌ Video not found. It may have been deleted.'
+                        else:
+                            msg = '❌ Download failed. Please try again or choose a different video.'
+                        await status_msg.edit_text(msg, reply_markup=None)
+                    queue_manager.complete_task(user_id)
+                    continue
 
         await queue.put(None)
         await progress_task
